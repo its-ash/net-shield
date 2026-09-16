@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetShield - Local DNS Firewall for Android</title>
+  <meta name="description" content="NetShield runs a local VPN on your Android device to filter DNS queries at the network level. Block ads, trackers, malware, and telemetry - no root required." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2310b981' d='M12 0C8.249 0 3.725.861 0 2.755 0 6.845-.051 17.037 12 24 24.051 17.037 24 6.845 24 2.755 20.275.861 15.751 0 12 0zm-.106 15.429L6.857 9.612c.331-.239 1.75-1.143 2.794.042l2.187 2.588c.009-.001 5.801-5.948 5.815-5.938.246-.22.694-.503 1.204-.101l-6.963 9.226z'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Space Grotesk', 'system-ui', 'sans-serif'],
+            sans: ['DM Sans', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            ink: {
+              950: '#08080a',
+              900: '#0d0d10',
+              800: '#16161b',
+              700: '#1f1f26',
+              600: '#2a2a33',
+              500: '#3a3a44',
+            },
+            shield: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root {
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    }
+
+    body {
+      background-color: #08080a;
+      color: #e4e4e7;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* Subtle grid background */
+    .grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 64px 64px;
+    }
+
+    /* Glow */
+    .glow-emerald {
+      box-shadow: 0 0 80px -20px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Reveal animation */
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Stagger */
+    .stagger > * {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 500ms var(--ease-out), transform 500ms var(--ease-out);
+    }
+    .stagger.visible > *:nth-child(1) { transition-delay: 0ms; }
+    .stagger.visible > *:nth-child(2) { transition-delay: 60ms; }
+    .stagger.visible > *:nth-child(3) { transition-delay: 120ms; }
+    .stagger.visible > *:nth-child(4) { transition-delay: 180ms; }
+    .stagger.visible > *:nth-child(5) { transition-delay: 240ms; }
+    .stagger.visible > *:nth-child(6) { transition-delay: 300ms; }
+    .stagger.visible > * {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Button press */
+    .btn-press {
+      transition: transform 140ms var(--ease-out);
+    }
+    .btn-press:active {
+      transform: scale(0.97);
+    }
+
+    /* Pulse for the shield */
+    @keyframes shield-pulse {
+      0%, 100% { box-shadow: 0 0 60px -10px rgba(16, 185, 129, 0.25); }
+      50% { box-shadow: 0 0 100px -10px rgba(16, 185, 129, 0.4); }
+    }
+    .shield-pulse {
+      animation: shield-pulse 4s ease-in-out infinite;
+    }
+
+    /* DNS flow animation */
+    @keyframes packet-flow {
+      0% { offset-distance: 0%; opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { offset-distance: 100%; opacity: 0; }
+    }
+
+    .packet {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #34d399;
+      offset-path: path('M 0 40 L 200 40 L 300 40 L 500 40');
+      animation: packet-flow 2.5s linear infinite;
+    }
+    .packet:nth-child(2) { animation-delay: 0.8s; }
+    .packet:nth-child(3) { animation-delay: 1.6s; }
+
+    .blocked-packet {
+      background: #f43f5e;
+    }
+
+    /* Marquee */
+    @keyframes marquee {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+    .marquee-track {
+      animation: marquee 30s linear infinite;
+    }
+
+    /* Nav blur on scroll */
+    .nav-scrolled {
+      background: rgba(8, 8, 10, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .reveal, .stagger > * {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+      }
+      .shield-pulse, .packet, .marquee-track {
+        animation: none !important;
+      }
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .hover-lift:hover {
+        transform: translateY(-2px);
+      }
+    }
+
+    .hover-lift {
+      transition: transform 200ms var(--ease-out);
+    }
+  </style>
+</head>
+
+<body class="min-h-screen overflow-x-hidden">
+
+  <!-- ═══ Nav ═══ -->
+  <nav id="nav" class="fixed top-0 left-0 right-0 z-50 border-b border-transparent transition-all duration-300">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <a href="#" class="flex items-center gap-2.5">
+          <svg viewBox="0 0 24 24" class="w-7 h-7 text-shield-500" fill="currentColor">
+            <path d="M12 0C8.249 0 3.725.861 0 2.755 0 6.845-.051 17.037 12 24 24.051 17.037 24 6.845 24 2.755 20.275.861 15.751 0 12 0zm-.106 15.429L6.857 9.612c.331-.239 1.75-1.143 2.794.042l2.187 2.588c.009-.001 5.801-5.948 5.815-5.938.246-.22.694-.503 1.204-.101l-6.963 9.226z" />
+          </svg>
+          <span class="font-display font-700 text-lg tracking-tight text-zinc-100">NetShield</span>
+        </a>
+        <div class="hidden md:flex items-center gap-8 text-sm text-zinc-400">
+          <a href="#how" class="hover:text-zinc-100 transition-colors duration-200">How it works</a>
+          <a href="#features" class="hover:text-zinc-100 transition-colors duration-200">Features</a>
+          <a href="#privacy" class="hover:text-zinc-100 transition-colors duration-200">Privacy</a>
+          <a href="#faq" class="hover:text-zinc-100 transition-colors duration-200">FAQ</a>
+        </div>
+        <a href="#download" class="btn-press inline-flex items-center gap-2 rounded-full bg-shield-500 px-5 py-2 text-sm font-500 text-ink-950 hover:bg-shield-400 transition-colors duration-200">
+          Get NetShield
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══ Hero ═══ -->
+  <section class="relative pt-32 pb-20 lg:pt-40 lg:pb-28 grid-bg">
+    <!-- Ambient glow -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-shield-500/10 blur-[120px] rounded-full pointer-events-none"></div>
+
+    <div class="relative max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="flex flex-col items-center text-center max-w-3xl mx-auto">
+        <!-- Shield icon -->
+        <div class="shield-pulse mb-8 w-20 h-20 rounded-3xl bg-shield-500/10 border border-shield-500/20 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" class="w-10 h-10 text-shield-500" fill="currentColor">
+            <path d="M12 0C8.249 0 3.725.861 0 2.755 0 6.845-.051 17.037 12 24 24.051 17.037 24 6.845 24 2.755 20.275.861 15.751 0 12 0zm-.106 15.429L6.857 9.612c.331-.239 1.75-1.143 2.794.042l2.187 2.588c.009-.001 5.801-5.948 5.815-5.938.246-.22.694-.503 1.204-.101l-6.963 9.226z" />
+          </svg>
+        </div>
+
+        <h1 class="font-display font-700 text-4xl sm:text-5xl lg:text-6xl tracking-tighter leading-[1.05] text-zinc-50 mb-6">
+          Your phone's DNS,<br class="hidden sm:block" /> filtered by you.
+        </h1>
+
+        <p class="text-lg text-zinc-400 leading-relaxed max-w-[55ch] mb-10">
+          NetShield runs a local VPN on your Android device to intercept DNS queries
+          at the network level. Block ads, trackers, malware, and telemetry - all
+          without root access.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-center gap-4">
+          <a href="#download" class="btn-press inline-flex items-center gap-2 rounded-full bg-shield-500 px-7 py-3.5 text-base font-500 text-ink-950 hover:bg-shield-400 transition-colors duration-200">
+            <svg viewBox="0 0 24 24" class="w-5 h-5" fill="currentColor"><path d="M17.523 15.34l2.387-4.135a.5.5 0 00-.866-.5l-2.418 4.188a7.356 7.356 0 00-9.052 0L5.156 10.705a.5.5 0 10-.866.5l2.387 4.135A7.4 7.4 0 003 19.5h18a7.4 7.4 0 00-3.477-4.16zM7 17.5a.6.6 0 110-1.2.6.6 0 010 1.2zm10 0a.6.6 0 110-1.2.6.6 0 010 1.2z"/></svg>
+            Download for Android
+          </a>
+          <a href="#how" class="btn-press inline-flex items-center gap-2 rounded-full border border-ink-600 px-7 py-3.5 text-base font-500 text-zinc-300 hover:border-ink-500 hover:text-zinc-100 transition-colors duration-200">
+            See how it works
+          </a>
+        </div>
+
+        <p class="mt-6 text-sm text-zinc-600 font-mono">
+          No root required - Android 10+ - Open source
+        </p>
+      </div>
+
+      <!-- DNS flow visual -->
+      <div class="reveal mt-20 max-w-4xl mx-auto">
+        <div class="relative rounded-2xl border border-ink-700 bg-ink-900/50 p-8 sm:p-12 overflow-hidden">
+          <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-shield-500/30 to-transparent"></div>
+
+          <div class="flex items-center justify-between gap-4 text-sm">
+            <!-- Source: Your apps -->
+            <div class="flex flex-col items-center gap-2 text-center">
+              <div class="w-14 h-14 rounded-xl bg-ink-700 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-7 h-7 text-zinc-400" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+              </div>
+              <span class="text-zinc-500 text-xs">Your apps</span>
+            </div>
+
+            <!-- Flow line with packets -->
+            <div class="flex-1 relative h-20 flex items-center">
+              <div class="w-full h-px bg-gradient-to-r from-shield-500/20 via-shield-500/40 to-shield-500/20"></div>
+              <div class="absolute inset-0 flex items-center justify-around">
+                <div class="packet"></div>
+                <div class="packet"></div>
+                <div class="packet blocked-packet"></div>
+              </div>
+              <!-- NetShield node -->
+              <div class="absolute left-1/2 -translate-x-1/2 -top-1 flex flex-col items-center">
+                <div class="w-16 h-16 rounded-2xl bg-shield-500/15 border border-shield-500/30 flex items-center justify-center glow-emerald">
+                  <svg viewBox="0 0 24 24" class="w-8 h-8 text-shield-500" fill="currentColor">
+                    <path d="M12 0C8.249 0 3.725.861 0 2.755 0 6.845-.051 17.037 12 24 24.051 17.037 24 6.845 24 2.755 20.275.861 15.751 0 12 0zm-.106 15.429L6.857 9.612c.331-.239 1.75-1.143 2.794.042l2.187 2.588c.009-.001 5.801-5.948 5.815-5.938.246-.22.694-.503 1.204-.101l-6.963 9.226z" />
+                  </svg>
+                </div>
+                <span class="text-shield-500 text-xs font-500 mt-2">NetShield VPN</span>
+              </div>
+            </div>
+
+            <!-- Destination: Upstream DNS -->
+            <div class="flex flex-col items-center gap-2 text-center">
+              <div class="w-14 h-14 rounded-xl bg-ink-700 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-7 h-7 text-zinc-400" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+              </div>
+              <span class="text-zinc-500 text-xs">Upstream DNS</span>
+            </div>
+          </div>
+
+          <div class="mt-8 flex items-center justify-center gap-6 text-xs text-zinc-500 font-mono">
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-shield-400"></span> Allowed</span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span> Blocked</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Trust strip ═══ -->
+  <section class="border-y border-ink-800 bg-ink-900/30 py-6">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="flex flex-wrap items-center justify-center gap-x-10 gap-y-3 text-sm text-zinc-500">
+        <span class="font-mono">630+ default blocked domains</span>
+        <span class="text-ink-600">/</span>
+        <span class="font-mono">0 analytics collected</span>
+        <span class="text-ink-600">/</span>
+        <span class="font-mono">100% on-device processing</span>
+        <span class="text-ink-600">/</span>
+        <span class="font-mono">No root required</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ How it works ═══ -->
+  <section id="how" class="py-24 lg:py-32">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="max-w-2xl mb-16">
+        <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-4">
+          DNS filtering, not content blocking
+        </h2>
+        <p class="text-zinc-400 leading-relaxed text-lg">
+          NetShield uses Android's VpnService to create a local DNS resolver.
+          Every DNS query from your apps passes through it. Domains on your
+          blocklist never leave the device - they get a null response. Everything
+          else goes to your chosen upstream resolver.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 stagger">
+        <!-- Step 1 -->
+        <div class="hover-lift rounded-2xl border border-ink-700 bg-ink-900/50 p-8">
+          <div class="w-12 h-12 rounded-xl bg-shield-500/10 flex items-center justify-center mb-5">
+            <span class="font-mono text-shield-500 font-500 text-lg">01</span>
+          </div>
+          <h3 class="font-display font-600 text-xl text-zinc-100 mb-3">Enable protection</h3>
+          <p class="text-zinc-400 leading-relaxed text-sm">
+            Tap the start button. Android asks for VPN permission. That's it -
+            NetShield begins intercepting DNS traffic immediately.
+          </p>
+        </div>
+
+        <!-- step 2 -->
+        <div class="hover-lift rounded-2xl border border-ink-700 bg-ink-900/50 p-8">
+          <div class="w-12 h-12 rounded-xl bg-shield-500/10 flex items-center justify-center mb-5">
+            <span class="font-mono text-shield-500 font-500 text-lg">02</span>
+          </div>
+          <h3 class="font-display font-600 text-xl text-zinc-100 mb-3">Rules are evaluated</h3>
+          <p class="text-zinc-400 leading-relaxed text-sm">
+            Each DNS query is checked against your allowlist, blocklists, and
+            custom rules using a reversed-domain trie for fast matching.
+          </p>
+        </div>
+
+        <!-- step 3 -->
+        <div class="hover-lift rounded-2xl border border-ink-700 bg-ink-900/50 p-8">
+          <div class="w-12 h-12 rounded-xl bg-shield-500/10 flex items-center justify-center mb-5">
+            <span class="font-mono text-shield-500 font-500 text-lg">03</span>
+          </div>
+          <h3 class="font-display font-600 text-xl text-zinc-100 mb-3">Blocked or forwarded</h3>
+          <p class="text-zinc-400 leading-relaxed text-sm">
+            Blocked domains get a null response. Allowed domains are forwarded
+            to your upstream resolver and cached according to DNS TTL.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Features ═══ -->
+  <section id="features" class="py-24 lg:py-32 bg-ink-900/30 border-y border-ink-800">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="max-w-2xl mb-16">
+        <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-4">
+          Built for control
+        </h2>
+        <p class="text-zinc-400 leading-relaxed text-lg">
+          Every DNS query is logged. Every rule is yours to edit. Every domain
+          can be tested before it matters.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
+        <!-- Feature: Live DNS log -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M3 3h18v2H3zm0 4h18v2H3zm0 4h12v2H3zm0 4h12v2H3zm0 4h18v2H3z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Live DNS activity log</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            See every query in real time - domain, action, and which rule
+            matched. Search, filter, and clear on demand.
+          </p>
+        </div>
+
+        <!-- Feature: Rule engine -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M3 4h18v2H3zm0 4h12v2H3zm0 4h18v2H3zm0 4h12v2H3zm0 4h18v2H3z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Rule priority engine</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            System safety, user allowlist, user blocklist, imported lists,
+            default allow. Allowlist always wins over blocklists.
+          </p>
+        </div>
+
+        <!-- Feature: Custom blocklist -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/><path d="M4.93 4.93l14.14 14.14" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Custom blocklist</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            Add exact domains or suffix rules. Categorize as ads, trackers,
+            malware, or telemetry. Toggle individual rules on or off.
+          </p>
+        </div>
+
+        <!-- Feature: Blocklist import -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Blocklist import</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            Import blocklist files from local storage. Remote sources can be
+            added in future releases.
+          </p>
+        </div>
+
+        <!-- Feature: DNS cache -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">DNS cache with TTL</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            In-memory cache respects DNS TTL. Reduces upstream queries and
+            speeds up repeated domain lookups.
+          </p>
+        </div>
+
+        <!-- Feature: Test mode -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M9 2h6v2h-2v3.17l5.31 5.31-1.42 1.42L12 8.41l-4.89 4.89-1.42-1.42L11 7.17V4H9V2zm3 10l4 4-4 4v-3H8v-2h4v-3z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Test mode and rule tester</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            Enter any domain to see the DNS response, IP addresses, rule
+            match, and response time - before it matters in production.
+          </p>
+        </div>
+
+        <!-- Feature: Import/Export -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M9 3h6v2H9V3zm0 4h6v2H9V7zm0 4h6v2H9v-2zm-4 4h14v2H5v-2zm0 4h14v2H5v-2z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Import / export config</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            Export your allowlist, custom rules, blocklist sources, and settings
+            as JSON. Restore on a new device.
+          </p>
+        </div>
+
+        <!-- Feature: Custom DNS resolvers -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Custom DNS resolvers</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            Use system default, or configure your own UDP/TCP upstream. DoH
+            and DoT support is planned for future releases.
+          </p>
+        </div>
+
+        <!-- Feature: Developer diagnostics -->
+        <div class="hover-lift rounded-xl border border-ink-700 bg-ink-900/50 p-6">
+          <div class="w-10 h-10 rounded-lg bg-shield-500/10 flex items-center justify-center mb-4">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-shield-500" fill="currentColor"><path d="M3 3h18v2H3zm0 4h18v2H3zm0 4h18v2H3zm0 4h18v2H3zm0 4h18v2H3z"/></svg>
+          </div>
+          <h3 class="font-display font-600 text-base text-zinc-100 mb-2">Developer diagnostics</h3>
+          <p class="text-zinc-500 text-sm leading-relaxed">
+            VPN status, DNS engine state, query count, cache size, rule count,
+            memory usage, and last DNS error - all visible.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Blocking categories ═══ -->
+  <section class="py-24 lg:py-32">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+        <div class="reveal">
+          <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-6">
+            Four categories of blocking, one rule engine
+          </h2>
+          <p class="text-zinc-400 leading-relaxed text-lg mb-8">
+            NetShield ships with 630+ default blocked domains across four
+            categories. Every domain can be individually toggled, edited, or
+            removed. You own the rules.
+          </p>
+          <a href="#download" class="btn-press inline-flex items-center gap-2 text-sm font-500 text-shield-500 hover:text-shield-400 transition-colors">
+            View the full default list
+            <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+
+        <div class="space-y-3 stagger">
+          <!-- Ads -->
+          <div class="hover-lift flex items-center justify-between rounded-xl border border-ink-700 bg-ink-900/50 px-6 py-5">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 text-rose-400" fill="currentColor"><path d="M1 9h2v2H1zm2 6h2v2H3zm2-3h2v2H5zm2 3h2v2H7zm2-3h2v2H9zm2 3h2v2h-2zm2-3h2v2h-2zm2 3h2v2h-2zm2-6h2v2h-2z"/></svg>
+              </div>
+              <div>
+                <h3 class="font-display font-600 text-zinc-100">Ads</h3>
+                <p class="text-zinc-500 text-sm">DoubleClick, AdSense, Taboola, Outbrain</p>
+              </div>
+            </div>
+            <span class="font-mono text-sm text-zinc-600">227</span>
+          </div>
+
+          <!-- Trackers -->
+          <div class="hover-lift flex items-center justify-between rounded-xl border border-ink-700 bg-ink-900/50 px-6 py-5">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 text-amber-400" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+              </div>
+              <div>
+                <h3 class="font-display font-600 text-zinc-100">Trackers</h3>
+                <p class="text-zinc-500 text-sm">Google Analytics, Hotjar, Mixpanel, Segment</p>
+              </div>
+            </div>
+            <span class="font-mono text-sm text-zinc-600">167</span>
+          </div>
+
+          <!-- Malware -->
+          <div class="hover-lift flex items-center justify-between rounded-xl border border-ink-700 bg-ink-900/50 px-6 py-5">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 text-red-400" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+              </div>
+              <div>
+                <h3 class="font-display font-600 text-zinc-100">Malware</h3>
+                <p class="text-zinc-500 text-sm">Known C2 servers, phishing domains, botnets</p>
+              </div>
+            </div>
+            <span class="font-mono text-sm text-zinc-600">88</span>
+          </div>
+
+          <!-- Telemetry -->
+          <div class="hover-lift flex items-center justify-between rounded-xl border border-ink-700 bg-ink-900/50 px-6 py-5">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 text-blue-400" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+              </div>
+              <div>
+                <h3 class="font-display font-600 text-zinc-100">Telemetry</h3>
+                <p class="text-zinc-500 text-sm">Microsoft, Mozilla, Crashlytics, Flurry</p>
+              </div>
+            </div>
+            <span class="font-mono text-sm text-zinc-600">147</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Privacy ═══ -->
+  <section id="privacy" class="py-24 lg:py-32 bg-ink-900/30 border-y border-ink-800">
+    <div class="max-w-4xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="reveal text-center">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-shield-500/10 border border-shield-500/20 mb-6">
+          <svg viewBox="0 0 24 24" class="w-7 h-7 text-shield-500" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+        </div>
+        <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-6">
+          Your DNS stays on your device
+        </h2>
+        <p class="text-zinc-400 leading-relaxed text-lg max-w-[55ch] mx-auto mb-12">
+          NetShield operates entirely locally. DNS logs are stored only on your
+          device and are never sent to an external server. No analytics are
+          collected. DNS queries for allowed domains are forwarded to your
+          selected upstream resolver, which may log them according to its own
+          privacy policy.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 stagger">
+        <div class="text-center p-6 rounded-xl border border-ink-700 bg-ink-900/50">
+          <div class="font-mono font-500 text-2xl text-shield-500 mb-2">0</div>
+          <div class="text-zinc-400 text-sm">Analytics events sent</div>
+        </div>
+        <div class="text-center p-6 rounded-xl border border-ink-700 bg-ink-900/50">
+          <div class="font-mono font-500 text-2xl text-shield-500 mb-2">0</div>
+          <div class="text-zinc-400 text-sm">DNS logs uploaded</div>
+        </div>
+        <div class="text-center p-6 rounded-xl border border-ink-700 bg-ink-900/50">
+          <div class="font-mono font-500 text-2xl text-shield-500 mb-2">100%</div>
+          <div class="text-zinc-400 text-sm">On-device processing</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Limitations (honest) ═══ -->
+  <section class="py-24 lg:py-32">
+    <div class="max-w-3xl mx-auto px-5 sm:px-6 lg:px-8">
+      <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-8">
+        What DNS filtering can and can't do
+      </h2>
+      <div class="space-y-4">
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-6 h-6 rounded-full bg-shield-500/15 flex items-center justify-center mt-0.5">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-shield-500" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+          </div>
+          <p class="text-zinc-400 leading-relaxed">
+            Blocks any domain identified at the DNS level - ad servers,
+            tracker endpoints, known malware C2 domains, and telemetry
+            endpoints.
+          </p>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-6 h-6 rounded-full bg-shield-500/15 flex items-center justify-center mt-0.5">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-shield-500" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+          </div>
+          <p class="text-zinc-400 leading-relaxed">
+            Works without root, using Android's official VpnService API.
+          </p>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-6 h-6 rounded-full bg-rose-500/15 flex items-center justify-center mt-0.5">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-rose-400" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </div>
+          <p class="text-zinc-400 leading-relaxed">
+            Cannot block ads served from the same domain as content. If an ad
+            and a page load from the same domain, DNS filtering cannot
+            distinguish them.
+          </p>
+        </div>
+        <div class="flex gap-4">
+          <div class="flex-shrink-0 w-6 h-6 rounded-full bg-rose-500/15 flex items-center justify-center mt-0.5">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-rose-400" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </div>
+          <p class="text-zinc-400 leading-relaxed">
+            Per-app DNS attribution is only available where Android's VPN API
+            reliably provides it. NetShield does not fabricate attribution
+            when it cannot be determined.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FAQ ═══ -->
+  <section id="faq" class="py-24 lg:py-32 bg-ink-900/30 border-y border-ink-800">
+    <div class="max-w-3xl mx-auto px-5 sm:px-6 lg:px-8">
+      <h2 class="font-display font-700 text-3xl sm:text-4xl tracking-tight text-zinc-50 mb-12">
+        Questions
+      </h2>
+
+      <div class="space-y-3">
+        <details class="group rounded-xl border border-ink-700 bg-ink-900/50 overflow-hidden">
+          <summary class="flex items-center justify-between px-6 py-5 cursor-pointer list-none">
+            <span class="font-display font-500 text-zinc-100">Does NetShield require root?</span>
+            <svg class="w-5 h-5 text-zinc-500 group-open:rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </summary>
+          <div class="px-6 pb-5 text-zinc-400 leading-relaxed">
+            No. NetShield uses Android's VpnService API, which works without
+            root. You only need to grant VPN permission when you start
+            protection.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-ink-700 bg-ink-900/50 overflow-hidden">
+          <summary class="flex items-center justify-between px-6 py-5 cursor-pointer list-none">
+            <span class="font-display font-500 text-zinc-100">Does it block all ads?</span>
+            <svg class="w-5 h-5 text-zinc-500 group-open:rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </summary>
+          <div class="px-6 pb-5 text-zinc-400 leading-relaxed">
+            No. DNS filtering only blocks domains identified at the DNS level.
+            Ads served from the same domain as content cannot be blocked this
+            way. NetShield is a network-level filter, not a content filter.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-ink-700 bg-ink-900/50 overflow-hidden">
+          <summary class="flex items-center justify-between px-6 py-5 cursor-pointer list-none">
+            <span class="font-display font-500 text-zinc-100">Where are my DNS logs stored?</span>
+            <svg class="w-5 h-5 text-zinc-500 group-open:rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </summary>
+          <div class="px-6 pb-5 text-zinc-400 leading-relaxed">
+            Only on your device, in a local file. You choose the retention
+            period: 1, 3, 7, 30 days, or disabled. Logs are never uploaded
+            anywhere.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-ink-700 bg-ink-900/50 overflow-hidden">
+          <summary class="flex items-center justify-between px-6 py-5 cursor-pointer list-none">
+            <span class="font-display font-500 text-zinc-100">Can I use my own DNS resolver?</span>
+            <svg class="w-5 h-5 text-zinc-500 group-open:rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </summary>
+          <div class="px-6 pb-5 text-zinc-400 leading-relaxed">
+            Yes. Configure any UDP or TCP upstream resolver in the DNS Servers
+            screen. DNS-over-HTTPS and DNS-over-TLS are planned for future
+            releases.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-ink-700 bg-ink-900/50 overflow-hidden">
+          <summary class="flex items-center justify-between px-6 py-5 cursor-pointer list-none">
+            <span class="font-display font-500 text-zinc-100">What Android version is required?</span>
+            <svg class="w-5 h-5 text-zinc-500 group-open:rotate-180 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+          </summary>
+          <div class="px-6 pb-5 text-zinc-400 leading-relaxed">
+            Android 10 (API 29) or later. The app uses VpnService,
+            foreground service with special-use type, and modern Android
+            networking APIs.
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ CTA ═══ -->
+  <section id="download" class="py-24 lg:py-32">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="reveal relative overflow-hidden rounded-3xl border border-shield-500/20 bg-gradient-to-br from-ink-900 to-ink-800 p-12 sm:p-16 lg:p-20 text-center">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[300px] bg-shield-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+
+        <div class="relative">
+          <h2 class="font-display font-700 text-3xl sm:text-4xl lg:text-5xl tracking-tight text-zinc-50 mb-6">
+            Start filtering your DNS today
+          </h2>
+          <p class="text-zinc-400 leading-relaxed text-lg max-w-[50ch] mx-auto mb-10">
+            Install NetShield, tap start, and grant VPN permission. That's it.
+            Every DNS query from every app passes through your rules.
+          </p>
+          <a href="#" class="btn-press inline-flex items-center gap-2 rounded-full bg-shield-500 px-8 py-4 text-base font-500 text-ink-950 hover:bg-shield-400 transition-colors duration-200">
+            <svg viewBox="0 0 24 24" class="w-5 h-5" fill="currentColor"><path d="M17.523 15.34l2.387-4.135a.5.5 0 00-.866-.5l-2.418 4.188a7.356 7.356 0 00-9.052 0L5.156 10.705a.5.5 0 10-.866.5l2.387 4.135A7.4 7.4 0 003 19.5h18a7.4 7.4 0 00-3.477-4.16zM7 17.5a.6.6 0 110-1.2.6.6 0 010 1.2zm10 0a.6.6 0 110-1.2.6.6 0 010 1.2z"/></svg>
+            Download for Android
+          </a>
+          <p class="mt-6 text-sm text-zinc-600 font-mono">
+            Android 10+ - 6MB - No root - No analytics
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Footer ═══ -->
+  <footer class="border-t border-ink-800 py-12">
+    <div class="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-6">
+        <div class="flex items-center gap-2.5">
+          <svg viewBox="0 0 24 24" class="w-6 h-6 text-shield-500" fill="currentColor">
+            <path d="M12 0C8.249 0 3.725.861 0 2.755 0 6.845-.051 17.037 12 24 24.051 17.037 24 6.845 24 2.755 20.275.861 15.751 0 12 0zm-.106 15.429L6.857 9.612c.331-.239 1.75-1.143 2.794.042l2.187 2.588c.009-.001 5.801-5.948 5.815-5.938.246-.22.694-.503 1.204-.101l-6.963 9.226z" />
+          </svg>
+          <span class="font-display font-700 text-zinc-100">NetShield</span>
+          <span class="text-zinc-600 text-sm font-mono ml-2">v1.0.0</span>
+        </div>
+        <div class="flex items-center gap-6 text-sm text-zinc-500">
+          <a href="#how" class="hover:text-zinc-100 transition-colors duration-200">How it works</a>
+          <a href="#features" class="hover:text-zinc-100 transition-colors duration-200">Features</a>
+          <a href="#privacy" class="hover:text-zinc-100 transition-colors duration-200">Privacy</a>
+          <a href="#faq" class="hover:text-zinc-100 transition-colors duration-200">FAQ</a>
+        </div>
+        <p class="text-zinc-600 text-sm">
+          Local DNS Firewall for Android
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Nav scroll blur
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      if (window.scrollY > 20) {
+        nav.classList.add('nav-scrolled');
+      } else {
+        nav.classList.remove('nav-scrolled');
+      }
+    }, { passive: true });
+
+    // Intersection Observer for reveals
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+    document.querySelectorAll('.reveal, .stagger').forEach((el) => {
+      observer.observe(el);
+    });
+  </script>
+
+</body>
+</html>
