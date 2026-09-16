@@ -106,6 +106,7 @@ class DnsVpnService : VpnService() {
             lastError = null
             Log.i(TAG, "VPN established, fd=${vpnInterface?.fileDescriptor?.valid()}")
             vpnThread = Thread(this::runVpnLoop, "DnsVpnThread").apply { start() }
+            com.itsash.local_dns_firewall.widget.NetShieldWidgetProvider.updateAllWidgets(this)
         } catch (e: Exception) {
             Log.e(TAG, "startVpn failed", e)
             lastError = e.message
@@ -375,6 +376,7 @@ class DnsVpnService : VpnService() {
         try { vpnInterface?.close() } catch (_: Exception) {}
         vpnInterface = null
         stopForeground(STOP_FOREGROUND_REMOVE)
+        com.itsash.local_dns_firewall.widget.NetShieldWidgetProvider.updateAllWidgets(this)
         stopSelf()
     }
 

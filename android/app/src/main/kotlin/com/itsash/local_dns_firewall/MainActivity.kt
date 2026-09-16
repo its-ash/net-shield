@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.itsash.local_dns_firewall/vpn"
     private val LOG_EVENT = "com.itsash.local_dns_firewall/logs"
     private val REQUEST_VPN = 100
+    private val REQUEST_VPN_WIDGET = 101
 
     private var pendingStart: MethodChannel.Result? = null
     private var logSink: EventChannel.EventSink? = null
@@ -158,9 +159,20 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_VPN) {
-            pendingStart?.success(resultCode == RESULT_OK)
-            pendingStart = null
+        when (requestCode) {
+            REQUEST_VPN -> {
+                pendingStart?.success(resultCode == RESULT_OK)
+                pendingStart = null
+            }
+            REQUEST_VPN_WIDGET -> {
+                if (resultCode == RESULT_OK) {
+                    startService(Intent(this, DnsVpnService::class.java).apply {
+                        action = DnsVpnService.ACTION_START
+                    })
+                }
+                widgetStartPending = false
+                com.itsash.local_dns_firewall.widget.NetShieldWidgetProvider.updateAllWidgets(applicationContext)
+            }
         }
     }
 
@@ -246,6 +258,46 @@ class MainActivity : FlutterActivity() {
             if (b == 0) { buf.position(buf.position() + 1); return }
             if ((b and 0xC0) == 0xC0) { buf.position(buf.position() + 2); return }
             buf.position(buf.position() + 1 + (b and 0x3F))
+        }
+    }
+
+    // ── Home-screen widget integration ──────────────────────────────────
+    // When the widget is tapped and VPN permission hasn't been granted yet,
+    // the widget launches MainActivity with this extra. We trigger the normal
+    // prepare → start flow so the user sees the Android VPN consent dialog.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetStart(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        handleWidgetStart(intent)
+        // Refresh widget visuals whenever the app comes to the foreground.
+        com.itsash.local_dns_firewall.widget.NetShieldWidgetProvider.updateAllWidgets(applicationContext)
+    }
+
+    private var widgetStartPending = false
+
+    private fun handleWidgetStart(intent: Intent?) {
+        if (intent?.getBooleanExtra("widget_start_vpn", false) == true && !widgetStartPending) {
+            widgetStartPending = true
+            intent.removeExtra("widget_start_vpn")
+            if (DnsVpnService.running) {
+                widgetStartPending = false
+                return
+            }
+            val prep = VpnService.prepare(this)
+            if (prep != null) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(prep, REQUEST_VPN_WIDGET)
+            } else {
+                startService(Intent(this, DnsVpnService::class.java).apply {
+                    action = DnsVpnService.ACTION_START
+                })
+                widgetStartPending = false
+            }
         }
     }
 }
