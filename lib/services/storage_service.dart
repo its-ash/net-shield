@@ -18,6 +18,8 @@ class StorageService {
   static const _keyRetention = 'log_retention_days';
   static const _keyDarkMode = 'dark_mode';
   static const _keyDefaultsSeeded = 'defaults_seeded';
+  static const _keyRemoteVersion = 'remote_blocklist_version';
+  static const _keyLastUpdate = 'remote_blocklist_last_update';
 
   late SharedPreferences _prefs;
 
@@ -25,6 +27,16 @@ class StorageService {
     _prefs = await SharedPreferences.getInstance();
     await _seedDefaults();
   }
+
+  // ---- Remote blocklist version tracking ----
+  String getRemoteBlocklistVersion() => _prefs.getString(_keyRemoteVersion) ?? '';
+  Future<void> setRemoteBlocklistVersion(String v) => _prefs.setString(_keyRemoteVersion, v);
+  DateTime? getRemoteBlocklistLastUpdate() {
+    final s = _prefs.getString(_keyLastUpdate);
+    return s != null ? DateTime.tryParse(s) : null;
+  }
+  Future<void> setRemoteBlocklistLastUpdate(DateTime dt) =>
+      _prefs.setString(_keyLastUpdate, dt.toIso8601String());
 
   /// On first launch, populate the custom blocklist with the shipped defaults.
   Future<void> _seedDefaults() async {

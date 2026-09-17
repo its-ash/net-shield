@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/storage_service.dart';
 import '../services/vpn_bridge.dart';
+import '../services/blocklist_update_service.dart';
 
 final storageProvider = Provider<StorageService>((ref) {
   throw UnimplementedError('Must be overridden in ProviderScope');
@@ -326,4 +327,48 @@ final retentionProvider = StateProvider<int>((ref) {
 
 final darkModeProvider = StateProvider<bool>((ref) {
   return ref.read(storageProvider).getDarkMode();
+});
+
+// ---- Remote blocklist update ----
+class BlocklistUpdateState {
+  final String version;
+  final DateTime? lastUpdated;
+  final bool isChecking;
+  final bool updated;
+  const BlocklistUpdateState({
+    this.version = '',
+    this.lastUpdated,
+    this.isChecking = false,
+    this.updated = false,
+  });
+}
+
+class BlocklistUpdateNotifier extends StateNotifier<BlocklistUpdateState> {
+  final StorageService _storage;
+  BlocklistUpdateNotifier(this._storage)
+      : super(BlocklistUpdateState(
+          version: _storage.getRemoteBlocklistVersion(),
+          lastUpdated: _storage.getRemoteBlocklistLastUpdate(),
+        ));
+
+  Future<void> checkForUpdate() async {
+    state = BlocklistUpdateState(
+      version: _storage.getRemoteBlocklistVersion(),
+      lastUpdated: _storage.getRemoteBlocklistLastUpdate(),
+      isChecking: true,
+    );
+    final svc = BlocklistUpdateService(_storage);
+    final didUpdate = await svc.checkAndUpdate();
+    state = BlocklistUpdateState(
+      version: _storage.getRemoteBlocklistVersion(),
+      lastUpdated: _storage.getRemoteBlocklistLastUpdate(),
+      isChecking: false,
+      updated: didUpdate,
+    );
+  }
+}
+
+final blocklistUpdateProvider =
+    StateNotifierProvider<BlocklistUpdateNotifier, BlocklistUpdateState>((ref) {
+  return BlocklistUpdateNotifier(ref.read(storageProvider));
 });
